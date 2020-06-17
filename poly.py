@@ -90,6 +90,38 @@ class LexOrder(list):
         return False
 
 
+class GrlexOrder(list):
+    def __lt__(self, other):
+        if sum(self) < sum(other):
+            return True
+        elif sum(self) > sum(other):
+            return False
+
+        for a, b in zip(self, other):
+            if a < b:
+                return True
+            elif a > b:
+                return False
+
+        return False
+
+
+class GrevlexOrder(list):
+    def __lt__(self, other):
+        if sum(self) < sum(other):
+            return True
+        elif sum(self) > sum(other):
+            return False
+
+        for a, b in list(zip(self, other))[::-1]:
+            if a > b:
+                return True
+            elif a < b:
+                return False
+
+        return False
+
+
 class Poly:
     def __init__(self, terms, poly_ring):
         self.terms = terms
@@ -112,7 +144,10 @@ class Poly:
                     monomial_str += variable
                     all_zero = False
                 else:
-                    monomial_str += variable + '^' + str(power)
+                    if latex:
+                        monomial_str += variable + '^{' + str(power) + '}'
+                    else:
+                        monomial_str += variable + '^' + str(power)
                     all_zero = False
 
             if coefficient == self.poly_ring.field.unit and not all_zero:
@@ -301,7 +336,10 @@ class PolyRing:
                 variable_index = self.variables.index(variable)
                 monomial[variable_index] = exponent
 
+            monomial = self.monomial_order(monomial)
+
             term = (coefficient, monomial)
             terms.append(term)
 
+        terms.sort(key=lambda p: p[1], reverse=True)
         return Poly(terms, self)
