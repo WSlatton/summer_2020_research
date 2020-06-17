@@ -13,6 +13,7 @@ from pyparsing import (
 )
 import re
 from fractions import Fraction as Q
+from heapq import merge
 
 
 class PolyParser:
@@ -122,6 +123,43 @@ class GrevlexOrder(list):
         return False
 
 
+"""
+merge two sorted lists maintaining sortedness according to key
+
+if elements x in a and y in b have the same key, then the merged list will
+instead contain combine(x, y) at whichever point x and y would have occurred
+"""
+
+
+def merge_combine(a, b, combine, key=lambda x: x):
+    l = []
+    i = 0
+    j = 0
+
+    while i < len(a) and j < len(b):
+        x = a[i]
+        y = b[j]
+        kx = key(x)
+        ky = key(y)
+
+        if kx == ky:
+            l.append(combine(x, y))
+            i += 1
+            j += 1
+        elif kx < ky:
+            l.append(x)
+            i += 1
+        else:
+            l.append(y)
+            j += 1
+        
+    if i < len(a):
+        l += a[i:]
+    elif j < len(b):
+        l += b[j:]
+        
+    return l
+
 class Poly:
     def __init__(self, terms, poly_ring):
         self.terms = terms
@@ -189,12 +227,26 @@ class Poly:
         return terms_str
 
     __str__ = to_str
-
-    __repr__ = __str__
+    __repr__ = to_str
 
     def _repr_latex_(self):
         return self.to_str(latex=True)
 
+    def __add__(self, q):
+        if not isinstance(q, Poly):
+            raise TypeError(
+                'cannot add ' + str(type(q).__name__) + ' to polynomial')
+        if self.poly_ring != q.poly_ring:
+            raise Exception('cannot add polynomial in ' +
+                            str(self.poly_ring) + ' to polynomial in ' + str(q.poly_ring))
+
+        terms = merge_combine(
+            self.terms,
+            q.terms,
+            lambda t1, t2: (t1[0] + t2[0], t1[1]),
+            key=lambda t: t[1]
+        )
+        return Poly(terms, self.poly_ring)
 
 class Field:
     zero = None
@@ -246,6 +298,13 @@ class RationalField(Field):
             else:
                 return str(element.numerator) + ' / ' + str(element.denominator), True
 
+    @staticmethod
+    def field_to_str(latex=False):
+        if latex:
+            return r'\mathbb{Q}'
+        else:
+            return 'Q'
+
 
 class RealField(Field):
     zero = 0
@@ -268,6 +327,13 @@ class RealField(Field):
             return str(int(element)), False
         else:
             return str(element), False
+
+    @staticmethod
+    def field_to_str(latex=False):
+        if latex:
+            return r'\mathbb{R}'
+        else:
+            return 'R'
 
 
 class ComplexField(Field):
@@ -314,6 +380,13 @@ class ComplexField(Field):
 
         return real_str + sign + imag_str + 'i', True
 
+    @staticmethod
+    def field_to_str(latex=False):
+        if latex:
+            return r'\mathbb{C}'
+        else:
+            return 'C'
+
 
 class PolyRing:
     def __init__(self, variables, field=RealField, monomial_order=LexOrder):
@@ -338,8 +411,25 @@ class PolyRing:
 
             monomial = self.monomial_order(monomial)
 
-            term = (coefficient, monomial)
-            terms.append(term)
+            for i in range(0, len(terms) + 1):
+                if i == len(terms) or monomial < terms[i][1]:
+                    term = (coefficient, monomial)
+                    terms.insert(i, term)
+                    break
+                elif monomial == terms[i][1]:
+                    terms[i] = (terms[i][0] + coefficient, terms[i][1])
+                    break
 
-        terms.sort(key=lambda p: p[1], reverse=True)
         return Poly(terms, self)
+
+    def to_str(self, latex=False):
+        if latex:
+            return '$' + self.field.field_to_str(latex) + '[' + ', '.join(self.variables) + ']$'
+        else:
+            return self.field.field_to_str(latex) + '[' + ', '.join(self.variables) + ']'
+
+    __str__ = to_str
+    __repr__ = to_str
+
+    def _repr_latex_(self):
+        return self.to_str(latex=True)
