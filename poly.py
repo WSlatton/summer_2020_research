@@ -152,23 +152,75 @@ def merge_combine(a, b, combine, key=lambda x: x):
         else:
             l.append(y)
             j += 1
-        
+
     if i < len(a):
         l += a[i:]
     elif j < len(b):
         l += b[j:]
-        
+
     return l
+
+
+class SortedList(list):
+    def __init__(self, items, key=lambda x: x, combine=lambda x, y: x, already_sorted=False):
+        self.key = key
+        self.combine = combine
+
+        if already_sorted:
+            self += items
+        else:
+            for item in items:
+                self.insert(item)
+    
+
+    def insert(self, item):
+        k = self.key(item)
+        for i in range(0, len(self) + 1):
+            if i == len(self) or k < self.key(self[i]):
+                super().insert(i, item)
+                break
+            elif k == self.key(self[i]):
+                self[i] = self.combine(self[i], item)
+                break
+
+    def merge(self, items):
+        l = []
+        i = 0
+        j = 0
+
+        while i < len(self) and j < len(items):
+            x = self[i]
+            y = items[j]
+            kx = self.key(x)
+            ky = self.key(y)
+
+            if kx == ky:
+                l.append(self.combine(x, y))
+                i += 1
+                j += 1
+            elif kx < ky:
+                l.append(x)
+                i += 1
+            else:
+                l.append(y)
+                j += 1
+
+        if i < len(self):
+            l += self[i:]
+        elif j < len(items):
+            l += items[j:]
+        
+        return SortedList(l, key=self.key, combine=self.combine, already_sorted=True)
 
 class Poly:
     def __init__(self, terms, poly_ring):
-        self.terms = terms
+        self.terms = SortedList(terms, key=lambda t: t[1], combine=lambda t1, t2: (t1[0] + t2[0], t1[1]))
         self.poly_ring = poly_ring
 
     def to_str(self, latex=False):
         terms_str = ''
 
-        for index, (coefficient, exponents) in enumerate(self.terms):
+        for index, (coefficient, exponents) in enumerate(self.terms[::-1]):
             monomial_str = ''
             all_zero = True
 
@@ -240,13 +292,19 @@ class Poly:
             raise Exception('cannot add polynomial in ' +
                             str(self.poly_ring) + ' to polynomial in ' + str(q.poly_ring))
 
-        terms = merge_combine(
-            self.terms,
-            q.terms,
-            lambda t1, t2: (t1[0] + t2[0], t1[1]),
-            key=lambda t: t[1]
-        )
+        terms = self.terms.merge(q.terms)
         return Poly(terms, self.poly_ring)
+
+    def __mul__(self, q):
+        if not isinstance(q, Poly):
+            raise TypeError(
+                'cannot add ' + str(type(q).__name__) + ' to polynomial')
+        if self.poly_ring != q.poly_ring:
+            raise Exception('cannot add polynomial in ' +
+                            str(self.poly_ring) + ' to polynomial in ' + str(q.poly_ring))
+
+        return self.terms
+
 
 class Field:
     zero = None
@@ -410,15 +468,8 @@ class PolyRing:
                 monomial[variable_index] = exponent
 
             monomial = self.monomial_order(monomial)
-
-            for i in range(0, len(terms) + 1):
-                if i == len(terms) or monomial < terms[i][1]:
-                    term = (coefficient, monomial)
-                    terms.insert(i, term)
-                    break
-                elif monomial == terms[i][1]:
-                    terms[i] = (terms[i][0] + coefficient, terms[i][1])
-                    break
+            term = (coefficient, monomial)
+            terms.append(term)
 
         return Poly(terms, self)
 
