@@ -13,7 +13,7 @@ from pyparsing import (
 )
 import re
 from fractions import Fraction as Q
-from heapq import merge
+import unittest
 
 
 class PolyParser:
@@ -94,6 +94,9 @@ class MonomialOrder(list):
                             ' and ' + str(other) + ' differ in length')
 
         return type(self)([a + b for a, b in zip(self, other)])
+
+    def __hash__(self):
+        return hash(str(self))
 
 
 class LexOrder(MonomialOrder):
@@ -215,6 +218,12 @@ class Poly:
 
         self.terms = SortedList(terms, key=lambda t: t[1], combine=combine)
         self.poly_ring = poly_ring
+
+    def __eq__(self, other):
+        if not isinstance(other, Poly):
+            return False
+
+        return self.poly_ring == other.poly_ring and self.terms == other.terms
 
     def to_str(self, latex=False):
         terms_str = ''
@@ -411,18 +420,20 @@ class ComplexField(Field):
     _integer = Word(nums)
     _real = Combine(_integer + Optional('.' + _integer))
     _sign = Literal('-') | '+'
-    _complex = Combine(Optional(_sign) + _real) + \
-        Optional(Combine(_sign + _real, adjacent=False) + Literal('i'))
+    _complex = Combine(Optional(_sign) + _real) + Literal('i') | Combine(Optional(
+        _sign) + _real) + Optional(Combine(_sign + _real, adjacent=False) + Literal('i'))
 
-    @staticmethod
+    @ staticmethod
     def parse(element_str):
         node = ComplexField._complex.parseString(element_str, parseAll=True)
         if len(node) == 1:
             return complex(float(node[0]))
+        elif len(node) == 2:
+            return complex(0, float(node[0]))
         elif len(node) == 3:
             return complex(float(node[0]), float(node[1]))
 
-    @staticmethod
+    @ staticmethod
     def to_str(element, latex=False):
         real_str = None
 
@@ -449,7 +460,7 @@ class ComplexField(Field):
 
         return real_str + sign + imag_str + 'i', True
 
-    @staticmethod
+    @ staticmethod
     def field_to_str(latex=False):
         if latex:
             return r'\mathbb{C}'
@@ -495,3 +506,49 @@ class PolyRing:
 
     def _repr_latex_(self):
         return self.to_str(latex=True)
+
+
+class TestPoly(unittest.TestCase):
+    def test_parse(self):
+        R = PolyRing(['x', 'y', 'z'], field=RationalField)
+        self.assertEqual(
+            set(R('xy-(-1)xz+z^22y^241+(-2/11)z-(3/11)x').terms),
+            set([
+                (Q(1), LexOrder([1, 1, 0])),
+                (Q(1), LexOrder([1, 0, 1])),
+                (Q(1), LexOrder([0, 241, 22])),
+                (Q(-2, 11), LexOrder([0, 0, 1])),
+                (Q(-3, 11), LexOrder([1, 0, 0]))
+            ])
+        )
+
+        R = PolyRing(['x', 'y', 'z'], field=ComplexField)
+        self.assertEqual(
+            set(R('xy-(-1.2i)xz+0.3z^22y^241+(-2 + 11i)z-(3 -11i)x+3xy').terms),
+            set([
+                (4, LexOrder([1, 1, 0])),
+                (1.2j, LexOrder([1, 0, 1])),
+                (0.3, LexOrder([0, 241, 22])),
+                (-2 + 11j, LexOrder([0, 0, 1])),
+                (-3 + 11j, LexOrder([1, 0, 0]))
+            ])
+        )
+
+    def test_add(self):
+        R = PolyRing(['x', 'y', 'z'], field=RationalField)
+        p = R('2x+x^2-x^3y')
+        q = R('x-x^2+27+2yx^3')
+        r = R('3x+27+x^3y')
+        self.assertEqual(p + q, r)
+
+    def test_mul(self):
+        R = PolyRing(['x', 'y', 'z'], field=RationalField)
+        p = R('2x+x^2-x^3y')
+        q = R('x-x^2+27+2yx^3')
+        r = R('54 x + 29 x^2 - x^3 - x^4 - 27 x^3 y + 3 x^4 y + 3 x^5 y - 2 x^6 y^2')
+        self.assertEqual(p * q, r)
+        self.assertNotEqual(p * q, r + R('1'))
+
+
+if __name__ == '__main__':
+    unittest.main()
