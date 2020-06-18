@@ -81,7 +81,22 @@ class PolyParser:
         return (variable, exponent)
 
 
-class LexOrder(list):
+class MonomialOrder(list):
+    def __add__(self, other):
+        if not isinstance(other, MonomialOrder):
+            raise TypeError(
+                'cannot add ' + type(other).__name__ + ' to monomial order')
+        if type(self) != type(other):
+            raise TypeError('cannot add monomial orders ' +
+                            type(self).__name__ + ' and ' + type(other).__name__)
+        if len(self) != len(other):
+            raise Exception('monomial orders ' + str(self) +
+                            ' and ' + str(other) + ' differ in length')
+
+        return type(self)([a + b for a, b in zip(self, other)])
+
+
+class LexOrder(MonomialOrder):
     def __lt__(self, other):
         for a, b in zip(self, other):
             if a < b:
@@ -91,7 +106,7 @@ class LexOrder(list):
         return False
 
 
-class GrlexOrder(list):
+class GrlexOrder(MonomialOrder):
     def __lt__(self, other):
         if sum(self) < sum(other):
             return True
@@ -107,7 +122,7 @@ class GrlexOrder(list):
         return False
 
 
-class GrevlexOrder(list):
+class GrevlexOrder(MonomialOrder):
     def __lt__(self, other):
         if sum(self) < sum(other):
             return True
@@ -123,44 +138,6 @@ class GrevlexOrder(list):
         return False
 
 
-"""
-merge two sorted lists maintaining sortedness according to key
-
-if elements x in a and y in b have the same key, then the merged list will
-instead contain combine(x, y) at whichever point x and y would have occurred
-"""
-
-
-def merge_combine(a, b, combine, key=lambda x: x):
-    l = []
-    i = 0
-    j = 0
-
-    while i < len(a) and j < len(b):
-        x = a[i]
-        y = b[j]
-        kx = key(x)
-        ky = key(y)
-
-        if kx == ky:
-            l.append(combine(x, y))
-            i += 1
-            j += 1
-        elif kx < ky:
-            l.append(x)
-            i += 1
-        else:
-            l.append(y)
-            j += 1
-
-    if i < len(a):
-        l += a[i:]
-    elif j < len(b):
-        l += b[j:]
-
-    return l
-
-
 class SortedList(list):
     def __init__(self, items, key=lambda x: x, combine=lambda x, y: x, already_sorted=False):
         self.key = key
@@ -171,7 +148,14 @@ class SortedList(list):
         else:
             for item in items:
                 self.insert(item)
-    
+
+    def remove_none(self):
+        i = 0
+        while i < len(self):
+            if self[i] is None:
+                del self[i]
+            else:
+                i += 1
 
     def insert(self, item):
         k = self.key(item)
@@ -182,6 +166,8 @@ class SortedList(list):
             elif k == self.key(self[i]):
                 self[i] = self.combine(self[i], item)
                 break
+
+        self.remove_none()
 
     def merge(self, items):
         l = []
@@ -209,12 +195,25 @@ class SortedList(list):
             l += self[i:]
         elif j < len(items):
             l += items[j:]
-        
-        return SortedList(l, key=self.key, combine=self.combine, already_sorted=True)
+
+        sl = SortedList(l, key=self.key, combine=self.combine,
+                        already_sorted=True)
+        sl.remove_none()
+        return sl
+
 
 class Poly:
     def __init__(self, terms, poly_ring):
-        self.terms = SortedList(terms, key=lambda t: t[1], combine=lambda t1, t2: (t1[0] + t2[0], t1[1]))
+        def combine(term1, term2):
+            coefficient = term1[0] + term2[0]
+            if coefficient == 0:
+                return None
+            else:
+                monomial = term1[1]
+                term = (coefficient, monomial)
+                return term
+
+        self.terms = SortedList(terms, key=lambda t: t[1], combine=combine)
         self.poly_ring = poly_ring
 
     def to_str(self, latex=False):
@@ -238,19 +237,20 @@ class Poly:
                         monomial_str += variable + '^{' + str(power) + '}'
                     else:
                         monomial_str += variable + '^' + str(power)
+
                     all_zero = False
 
-            if coefficient == self.poly_ring.field.unit and not all_zero:
-                coefficient_str = ''
-                needs_parens = False
-            else:
-                coefficient_str, needs_parens = self.poly_ring.field.to_str(
-                    coefficient, latex)
+            coefficient_str, needs_parens = self.poly_ring.field.to_str(
+                coefficient, latex)
 
             sign = None
 
-            if coefficient_str == '':
+            if coefficient == self.poly_ring.field.unit and not all_zero:
+                coefficient_str = ''
                 sign = '+'
+            elif coefficient == -self.poly_ring.field.unit and not all_zero:
+                coefficient_str = ''
+                sign = '-'
             elif needs_parens:
                 coefficient_str = '(' + coefficient_str + ')'
                 sign = '+'
@@ -263,12 +263,14 @@ class Poly:
             if index == 0:
                 if sign == '+':
                     terms_str += coefficient_str + monomial_str
-                elif sign == '-':
+                elif sign == '-' and coefficient_str != '':
                     coefficient_str, _ = self.poly_ring.field.to_str(
                         -coefficient, latex)
                     terms_str += sign + coefficient_str + monomial_str
+                else:
+                    terms_str += sign + coefficient_str + monomial_str
             else:
-                if sign == '-':
+                if sign == '-' and coefficient_str != '':
                     coefficient_str, _ = self.poly_ring.field.to_str(
                         -coefficient, latex)
                 terms_str += ' ' + sign + ' ' + coefficient_str + monomial_str
@@ -303,7 +305,16 @@ class Poly:
             raise Exception('cannot add polynomial in ' +
                             str(self.poly_ring) + ' to polynomial in ' + str(q.poly_ring))
 
-        return self.terms
+        terms = []
+
+        for t1 in self.terms:
+            for t2 in q.terms:
+                coefficient = t1[0] * t2[0]
+                monomial = t1[1] + t2[1]
+                term = (coefficient, monomial)
+                terms.append(term)
+
+        return Poly(terms, self.poly_ring)
 
 
 class Field:
