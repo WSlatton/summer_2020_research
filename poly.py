@@ -228,6 +228,9 @@ class Poly:
     def to_str(self, latex=False):
         terms_str = ''
 
+        if self.terms == []:
+            return '0'
+
         for index, (coefficient, exponents) in enumerate(self.terms[::-1]):
             monomial_str = ''
             all_zero = True
@@ -295,29 +298,32 @@ class Poly:
     def _repr_latex_(self):
         return self.to_str(latex=True)
 
-    def __add__(self, q):
-        if not isinstance(q, Poly):
+    def __add__(self, other):
+        if not isinstance(other, Poly):
             raise TypeError(
-                'cannot add ' + str(type(q).__name__) + ' to polynomial')
-        if self.poly_ring != q.poly_ring:
-            raise Exception('cannot add polynomial in ' +
-                            str(self.poly_ring) + ' to polynomial in ' + str(q.poly_ring))
+                'cannot add ' + str(type(other).__name__) + ' to polynomial')
+        if self.poly_ring != other.poly_ring:
+            raise Exception('cannot add polynomial in ' + str(self.poly_ring) +
+                            ' to polynomial in ' + str(other.poly_ring))
 
-        terms = self.terms.merge(q.terms)
+        terms = self.terms.merge(other.terms)
         return Poly(terms, self.poly_ring)
 
-    def __mul__(self, q):
-        if not isinstance(q, Poly):
+    def __sub__(self, other):
+        return self + self.poly_ring('-1') * other
+
+    def __mul__(self, other):
+        if not isinstance(other, Poly):
             raise TypeError(
-                'cannot add ' + str(type(q).__name__) + ' to polynomial')
-        if self.poly_ring != q.poly_ring:
-            raise Exception('cannot add polynomial in ' +
-                            str(self.poly_ring) + ' to polynomial in ' + str(q.poly_ring))
+                'cannot add ' + str(type(other).__name__) + ' to polynomial')
+        if self.poly_ring != other.poly_ring:
+            raise Exception('cannot add polynomial in ' + str(self.poly_ring) +
+                            ' to polynomial in ' + str(other.poly_ring))
 
         terms = []
 
         for t1 in self.terms:
-            for t2 in q.terms:
+            for t2 in other.terms:
                 coefficient = t1[0] * t2[0]
                 monomial = t1[1] + t2[1]
                 term = (coefficient, monomial)
@@ -325,20 +331,88 @@ class Poly:
 
         return Poly(terms, self.poly_ring)
 
+    def lt(self):
+        term = self.terms[-1]
+        return Term(term, self.poly_ring)
+
+    def lc(self):
+        return self.terms[-1][0]
+
+    def lm(self):
+        return self.terms[-1][1]
+
+    def __truediv__(self, other):
+        if not isinstance(other, Poly):
+            raise TypeError('cannot divide polynomial by ' +
+                            type(other).__name__)
+
+        if self.poly_ring != other.poly_ring:
+            raise Exception('cannot divide polynomial in ' +
+                            str(self.poly_ring) + ' by polynomial in ' + str(other.poly_ring))
+
+        q = self.poly_ring('0')
+        r = self
+
+        while r != self.poly_ring('0') and other.lt().divides(r.lt()):
+            q += (r.lt() / other.lt())
+            r -= (r.lt() / other.lt()) * other
+
+        return q, r
+
+
+class Term(Poly):
+    def __init__(self, term, poly_ring):
+        super().__init__([term], poly_ring)
+
+    def coefficient(self):
+        return self.terms[0][0]
+
+    def monomial(self):
+        return self.terms[0][1]
+
+    def divides(self, other):
+        if not isinstance(other, Term):
+            raise TypeError('cannot call divides with ' + type(other).__name__)
+
+        if self.poly_ring != other.poly_ring:
+            raise Exception('cannot call divides with term in ' +
+                            str(self.poly_ring) + ' and term in ' + str(other.poly_ring))
+
+        for i, j in zip(self.monomial(), other.monomial()):
+            if i > j:
+                return False
+
+        return True
+
+    def __truediv__(self, other):
+        if not isinstance(other, Term):
+            raise TypeError('cannot divide polynomial by ' +
+                            type(other).__name__)
+
+        if self.poly_ring != other.poly_ring:
+            raise Exception('cannot divide term in ' +
+                            str(self.poly_ring) + ' by term in ' + str(other.poly_ring))
+
+        coefficient = self.coefficient() / other.coefficient()
+        monomial = self.poly_ring.monomial_order(
+            [a - b for a, b in zip(self.monomial(), other.monomial())])
+        term = (coefficient, monomial)
+        return Term(term, self.poly_ring)
+
 
 class Field:
     zero = None
     unit = None
 
-    @staticmethod
+    @ staticmethod
     def parse(element_str):
         pass
 
-    @staticmethod
+    @ staticmethod
     def sign(element):
         return None
 
-    @staticmethod
+    @ staticmethod
     def to_str(element, latex=False):
         pass
 
@@ -350,7 +424,7 @@ class RationalField(Field):
     _sign = Literal('-') | '+'
     _rational = Combine(Optional(_sign) + _integer) + Optional('/' + _integer)
 
-    @staticmethod
+    @ staticmethod
     def parse(element_str):
         node = RationalField._rational.parseString(element_str, parseAll=True)
 
@@ -359,14 +433,14 @@ class RationalField(Field):
         elif len(node) == 3:
             return Q(int(node[0]), int(node[2]))
 
-    @staticmethod
+    @ staticmethod
     def sign(element):
         if element > 0:
             return '+'
         elif element < 0:
             return '-'
 
-    @staticmethod
+    @ staticmethod
     def to_str(element, latex=False):
         if element.denominator == 1:
             return str(element.numerator), False
@@ -376,7 +450,7 @@ class RationalField(Field):
             else:
                 return str(element.numerator) + ' / ' + str(element.denominator), True
 
-    @staticmethod
+    @ staticmethod
     def field_to_str(latex=False):
         if latex:
             return r'\mathbb{Q}'
@@ -388,25 +462,25 @@ class RealField(Field):
     zero = 0
     unit = 1
 
-    @staticmethod
+    @ staticmethod
     def parse(element_str):
         return float(element_str)
 
-    @staticmethod
+    @ staticmethod
     def sign(element):
         if element > 0:
             return '+'
         elif element < 0:
             return '-'
 
-    @staticmethod
+    @ staticmethod
     def to_str(element, latex=False):
         if element.is_integer():
             return str(int(element)), False
         else:
             return str(element), False
 
-    @staticmethod
+    @ staticmethod
     def field_to_str(latex=False):
         if latex:
             return r'\mathbb{R}'
