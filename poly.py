@@ -373,14 +373,14 @@ class Poly:
         r = self.poly_ring('0')
 
         while p != self.poly_ring('0'):
-            any_divide = False
-            for i in range(0, len(gs)):
+            division_occurred = False
+            for i in range(0, len(gs)) and not division_occurred:
                 g = gs[i]
                 if g.lt().divides(p.lt()):
                     qs[i] += (p.lt() / g.lt())
                     p -= (p.lt() / g.lt()) * g
-                    any_divide = True
-            if not any_divide:
+                    division_occurred = True
+            if not division_occurred:
                 r += p.lt()
                 p -= p.lt()
 
