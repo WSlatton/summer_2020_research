@@ -340,24 +340,54 @@ class Poly:
 
     def lm(self):
         return self.terms[-1][1]
+    
+    def get_terms(self):
+        return [Term(term, self.poly_ring) for term in self.terms]
 
     def __truediv__(self, other):
-        if not isinstance(other, Poly):
+        f = self
+        gs = None
+        single = False
+
+        if isinstance(other, Poly):
+            gs = [other]
+            single = True
+        elif isinstance(other, list):
+            gs = other
+
+            for g in gs:
+                if not isinstance(g, Poly):
+                    raise TypeError('cannot divide polynomial by ' +
+                                    type(other).__name__)
+        else:
             raise TypeError('cannot divide polynomial by ' +
                             type(other).__name__)
 
-        if self.poly_ring != other.poly_ring:
-            raise Exception('cannot divide polynomial in ' +
-                            str(self.poly_ring) + ' by polynomial in ' + str(other.poly_ring))
+        for g in gs:
+            if self.poly_ring != g.poly_ring:
+                raise Exception('cannot divide polynomial in ' +
+                                str(self.poly_ring) + ' by polynomial in ' + str(other.poly_ring))
 
-        q = self.poly_ring('0')
-        r = self
+        qs = [self.poly_ring('0')] * len(gs)
+        p = f
+        r = self.poly_ring('0')
 
-        while r != self.poly_ring('0') and other.lt().divides(r.lt()):
-            q += (r.lt() / other.lt())
-            r -= (r.lt() / other.lt()) * other
+        while p != self.poly_ring('0'):
+            any_divide = False
+            for i in range(0, len(gs)):
+                g = gs[i]
+                if g.lt().divides(p.lt()):
+                    qs[i] += (p.lt() / g.lt())
+                    p -= (p.lt() / g.lt()) * g
+                    any_divide = True
+            if not any_divide:
+                r += p.lt()
+                p -= p.lt()
 
-        return q, r
+        if single:
+            return qs[0], r
+        else:
+            return qs, r
 
 
 class Term(Poly):
