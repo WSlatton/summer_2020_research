@@ -14,6 +14,7 @@ from pyparsing import (
 import re
 from fractions import Fraction as Q
 import unittest
+from itertools import combinations
 
 
 class PolyParser:
@@ -38,7 +39,6 @@ class PolyParser:
     def parse_term(self, term_node):
         coefficient = None
         monomial = None
-
         # no sign, possible in first term
         if len(term_node) == 2:
             coefficient = self.parse_coefficient(term_node[0])
@@ -94,6 +94,19 @@ class MonomialOrder(list):
                             ' and ' + str(other) + ' differ in length')
 
         return type(self)([a + b for a, b in zip(self, other)])
+
+    def __sub__(self, other):
+        if not isinstance(other, MonomialOrder):
+            raise TypeError(
+                'cannot add ' + type(other).__name__ + ' to monomial order')
+        if type(self) != type(other):
+            raise TypeError('cannot add monomial orders ' +
+                            type(self).__name__ + ' and ' + type(other).__name__)
+        if len(self) != len(other):
+            raise Exception('monomial orders ' + str(self) +
+                            ' and ' + str(other) + ' differ in length')
+
+        return type(self)([a - b for a, b in zip(self, other)])
 
     def __hash__(self):
         return hash(str(self))
@@ -338,9 +351,9 @@ class Poly:
     def lc(self):
         return self.terms[-1][0]
 
-    def lm(self):
+    def mdeg(self):
         return self.terms[-1][1]
-    
+
     def get_terms(self):
         return [Term(term, self.poly_ring) for term in self.terms]
 
@@ -374,12 +387,13 @@ class Poly:
 
         while p != self.poly_ring('0'):
             division_occurred = False
-            for i in range(0, len(gs)) and not division_occurred:
+            for i in range(0, len(gs)):
                 g = gs[i]
                 if g.lt().divides(p.lt()):
                     qs[i] += (p.lt() / g.lt())
                     p -= (p.lt() / g.lt()) * g
                     division_occurred = True
+                    break
             if not division_occurred:
                 r += p.lt()
                 p -= p.lt()
@@ -388,6 +402,9 @@ class Poly:
             return qs[0], r
         else:
             return qs, r
+    
+    def __mod__(self, other):
+        return (self / other)[1]
 
 
 class Term(Poly):
@@ -579,23 +596,37 @@ class PolyRing:
         self.variables = variables
         self.monomial_order = monomial_order
 
-    def __call__(self, terms_str):
-        terms_node = self.poly_parser.parse(terms_str)
+    def __call__(self, terms_rep, second=None):
         terms = []
 
-        for coefficient, monomial_node in terms_node:
-            if coefficient == self.field.zero:
-                continue
+        if isinstance(terms_rep, str):
+            terms_node = self.poly_parser.parse(terms_rep)
 
-            monomial = [0] * len(self.variables)
+            for coefficient, monomial_node in terms_node:
+                if coefficient == self.field.zero:
+                    continue
 
-            for variable, exponent in monomial_node:
-                variable_index = self.variables.index(variable)
-                monomial[variable_index] = exponent
+                monomial = [0] * len(self.variables)
 
-            monomial = self.monomial_order(monomial)
-            term = (coefficient, monomial)
-            terms.append(term)
+                for variable, exponent in monomial_node:
+                    variable_index = self.variables.index(variable)
+                    monomial[variable_index] = exponent
+
+                monomial = self.monomial_order(monomial)
+                term = (coefficient, monomial)
+                terms.append(term)
+        elif isinstance(terms_rep, MonomialOrder):
+            terms.append((1, terms_rep))
+        elif isinstance(terms_rep, list) and len(terms_rep) > 0 and not isinstance(terms_rep[0], tuple):
+            terms.append((1, terms_rep))
+        elif isinstance(terms_rep, list):
+            for coefficient, monomial in terms_rep:
+                if isinstance(monomial, MonomialOrder):
+                    terms.append((coefficient, monomial))
+                else:
+                    terms.append((coefficient, self.monomial_order(monomial)))
+        elif second != None:
+            terms.append((terms_rep, second))
 
         return Poly(terms, self)
 
@@ -604,6 +635,86 @@ class PolyRing:
             return '$' + self.field.field_to_str(latex) + '[' + ', '.join(self.variables) + ']$'
         else:
             return self.field.field_to_str(latex) + '[' + ', '.join(self.variables) + ']'
+
+    __str__ = to_str
+    __repr__ = to_str
+
+    def _repr_latex_(self):
+        return self.to_str(latex=True)
+
+
+def lcm(a, b):
+    if type(a) != type(b):
+        a_order_name = type(a).__name__
+        b_order_name = type(b).__name__
+        raise TypeError(
+            f'cannot take lcm of monomial orders {a_order_name} and {b_order_name}')
+    if len(a) != len(b):
+        raise Exception(f'monomial orders {a} and {b} differ in length')
+
+    order = type(a)
+    return order([max(ai, bi) for ai, bi in zip(a, b)])
+
+
+def S(f, g):
+    if f.poly_ring != g.poly_ring:
+        raise Exception(
+            'cannot add polynomial in {a.poly_ring} to polynomial in {b.poly_ring}')
+
+    R = f.poly_ring
+    c = lcm(f.mdeg(), g.mdeg())
+    a = f.mdeg()
+    b = g.mdeg()
+    return R(1/f.lc(), c - a) * f - R(1/g.lc(), c - b) * g
+
+
+def buchberger_criterion(basis, witness=False):
+    if len(basis) == 0:
+        return True
+    
+    R = basis[0].poly_ring
+
+    for f in basis:
+        for g in basis:
+            if S(f, g) % basis != R('0'):
+                if witness:
+                    print(f'S({f}, {g}) % {basis} is nonzero.')
+                return False
+    
+    return True
+
+
+class Ideal(list):
+    def get_groebner(self):
+        if len(self) == 0:
+            return self
+
+        G = Ideal(self.copy())
+        P = list(combinations(G, 2))
+
+        R = self[0].poly_ring
+        
+        while len(P) > 0:
+            f, g = P.pop()
+            r = S(f, g) % G
+
+            if r != R('0'):
+                G.append(r)
+                P += [(f, r) for f in G]
+        
+        return G
+
+    def to_str(self, latex=False):
+        if latex:
+            poly_strs = []
+            for poly in self:
+                poly_strs.append(poly.to_str(latex=True)[1:-1])
+            return f'$\\langle {",".join(poly_strs)} \\rangle$'
+        else:
+            poly_strs = []
+            for poly in self:
+                poly_strs.append(poly.to_str(latex=False))
+            return f'<{", ".join(poly_strs)}>'    
 
     __str__ = to_str
     __repr__ = to_str
@@ -652,7 +763,15 @@ class TestPoly(unittest.TestCase):
         r = R('54 x + 29 x^2 - x^3 - x^4 - 27 x^3 y + 3 x^4 y + 3 x^5 y - 2 x^6 y^2')
         self.assertEqual(p * q, r)
         self.assertNotEqual(p * q, r + R('1'))
-
+    
+    def test_groebner(self):
+        R = PolyRing(['x', 'y'], field=RationalField, monomial_order=GrlexOrder)
+        f1 = R('x^3-2xy')
+        f2 = R('x^2y-2y^2+x')
+        I = Ideal([f1, f2])
+        self.assertFalse(buchberger_criterion(I))
+        I_g = I.get_groebner()
+        self.assertTrue(buchberger_criterion(I_g))
 
 if __name__ == '__main__':
     unittest.main()
