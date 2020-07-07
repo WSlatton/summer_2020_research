@@ -668,21 +668,6 @@ def S(f, g):
     return R(1/f.lc(), c - a) * f - R(1/g.lc(), c - b) * g
 
 
-def buchberger_criterion(basis, witness=False):
-    if len(basis) == 0:
-        return True
-    
-    R = basis[0].poly_ring
-
-    for f in basis:
-        for g in basis:
-            if S(f, g) % basis != R('0'):
-                if witness:
-                    print(f'S({f}, {g}) % {basis} is nonzero.')
-                return False
-    
-    return True
-
 
 class Ideal(list):
     def get_groebner(self):
@@ -703,6 +688,21 @@ class Ideal(list):
                 P += [(f, r) for f in G]
         
         return G
+    
+    def is_groebner(self, witness=False):
+        if len(self) == 0:
+            return True
+    
+        R = self[0].poly_ring
+
+        for f, g in combinations(self, 2):
+            if S(f, g) % self != R('0'):
+                if witness:
+                    print(f'S({f}, {g}) % {self} is nonzero.')
+                return False
+    
+        return True
+
 
     def to_str(self, latex=False):
         if latex:
@@ -769,9 +769,9 @@ class TestPoly(unittest.TestCase):
         f1 = R('x^3-2xy')
         f2 = R('x^2y-2y^2+x')
         I = Ideal([f1, f2])
-        self.assertFalse(buchberger_criterion(I))
+        self.assertFalse(I.is_groebner())
         I_g = I.get_groebner()
-        self.assertTrue(buchberger_criterion(I_g))
+        self.assertTrue(I_g.is_groebner())
 
 if __name__ == '__main__':
     unittest.main()
