@@ -16,8 +16,8 @@ class CriticNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.fc1 = nn.Linear(4, 64)
-        self.fc2 = nn.Linear(64, 32)
-        self.fc3 = nn.Linear(32, 1)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 1)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
@@ -112,7 +112,7 @@ class Policy:
             if episode_reward >= 200:
                 meet_goal += 1
 
-        if meet_goal == episodes:
+        if meet_goal > 0.9 * episodes:
             print('solved!')
             torch.save(self.policy_net.state_dict(), 'solution_policy')
             sys.exit()
@@ -133,9 +133,9 @@ class Actor:
         self.done = True
 
     def step(self, policy):
-        trajectory_states = []  # torch.zeros(self.trajectory_length, 4)
-        trajectory_actions = []  # torch.zeros(self.trajectory_length)
-        td_errors = []  # torch.zeros(self.trajectory_length)
+        trajectory_states = torch.zeros(self.trajectory_length, 4)
+        trajectory_actions = torch.zeros(self.trajectory_length)
+        td_errors = torch.zeros(self.trajectory_length)
         previous_state = self.state
 
         for t in range(self.trajectory_length):
@@ -143,23 +143,18 @@ class Actor:
                 self.state = self.env.reset()
                 previous_state = self.state
 
-            # trajectory_states[t] = to_t(self.state)
-            trajectory_states.append(to_t(self.state))
+            trajectory_states[t] = to_t(self.state)
             action = policy.sample_action(self.state)
-            # trajectory_actions[t] = action
-            trajectory_actions.append(action)
+            trajectory_actions[t] = action
 
             self.state, reward, self.done, _ = self.env.step(action)
             previous_state_value, state_value = self.critic.step(previous_state, self.state, reward, self.done)
-            # td_errors[t] = reward + self.gae_gamma * state_value - previous_state_value
-            td_errors.append(reward + self.gae_gamma * state_value - previous_state_value)
+            td_errors[t] = reward + self.gae_gamma * state_value - previous_state_value
             previous_state = self.state
 
             if torch.isnan(td_errors[t]).any():
                 pass
 
-        # advantages = torch.zeros(self.trajectory_length)
-        advantages = torch.zeros(len(td_errors))
         advantages = torch.zeros(self.trajectory_length)
         previous_advantage = 0
 
@@ -168,8 +163,6 @@ class Actor:
             advantages[t] = advantage
             previous_advantage = advantage
 
-        trajectory_states = torch.stack(trajectory_states)
-        trajectory_actions = to_t(trajectory_actions)
         return trajectory_states, trajectory_actions, advantages.detach()
 
 
@@ -189,8 +182,13 @@ class PPO:
         for epoch in range(self.epochs):
             probabilities = self.policy.probabilities(trajectory_states, trajectory_actions)
             ratio = probabilities / old_probabilities
+            ratio = torch.clamp(ratio, -10, 10)
             clipped_ratio = torch.clamp(ratio, 1 - self.ratio_clipping_amount, 1 + self.ratio_clipping_amount)
             objective = torch.mean(torch.min(clipped_ratio * advantages, ratio * advantages))
+
+            if torch.isnan(objective).any():
+                pass
+
             self.logger(objective, ratio, clipped_ratio, advantages)
             loss = -objective
             self.policy_optim.zero_grad()
@@ -199,7 +197,8 @@ class PPO:
 
 
 def main():
-    env = gym.make('CartPole-v1')
+    actor_env = gym.make('CartPole-v1')
+    evaluation_env = gym.make('CartPole-v1')
     writer = tensorboard.SummaryWriter()
 
     critic_step = 0
@@ -233,8 +232,8 @@ def main():
         writer.add_scalar('ppo/mean_advantage', torch.mean(advantages), ppo_step)
         ppo_step += 1
 
-    critic_learning_rate = 5e-4
-    trace_decay_rate = 0.7
+    critic_learning_rate = 1e-3
+    trace_decay_rate = 0.8
     critic = Critic(critic_learning_rate, trace_decay_rate, critic_logger)
 
     policy_step = 0
@@ -247,11 +246,11 @@ def main():
     gae_gamma = 0.98
     gae_lambda = 0.96
     trajectory_length = 50
-    actor = Actor(env, critic, gae_gamma, gae_lambda, trajectory_length)
-    policy = Policy(env, policy_logger)
-    policy_learning_rate = 4e-4
-    ratio_clipping_amount = 0.3
-    epochs = 30
+    actor = Actor(actor_env, critic, gae_gamma, gae_lambda, trajectory_length)
+    policy = Policy(evaluation_env, policy_logger)
+    policy_learning_rate = 3e-4
+    ratio_clipping_amount = 0.2
+    epochs = 10
     ppo = PPO(actor, policy, policy_learning_rate, ratio_clipping_amount, epochs, ppo_logger)
 
     for i in range(10000):
